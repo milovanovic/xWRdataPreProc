@@ -97,7 +97,7 @@ abstract class XWRdataPreProcBlock [ D, U, E, O, B <: Data] (beatBytes: Int) ext
     // Define abstract register map so it can be AXI4, Tilelink, APB, AHB
     regmap(fields.zipWithIndex.map({ case (f, i) => i * beatBytes -> Seq(f)}): _*)
     
-    // in.ready:= out.ready // to check whether ready signal is generated or not
+    in.ready := out.ready
     when (testPattern || rawData || adcFormat === 0.U) {
       out.bits.data    := in.bits.data // lsb bits are filled, by default msb bits are zero 
       out.valid        := in.valid
