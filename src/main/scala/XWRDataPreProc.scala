@@ -105,7 +105,7 @@ abstract class XWRdataPreProcBlock [ D, U, E, O, B <: Data] (beatBytes: Int, max
     val fields = Seq(
       // settable registers
       RegField(1, IQSwap,
-        RegFieldDesc(name = "IQ swap", desc = "I or Q data is first sent")),
+        RegFieldDesc(name = "IQswap", desc = "I or Q data is first sent")),
       RegField(2, adcFormat,
         RegFieldDesc(name = "adcFormat", desc = "Define adcFormat 0 -> real, 1 -> complex 1x, 2 -> complex")),
       RegField(1, testPattern,
