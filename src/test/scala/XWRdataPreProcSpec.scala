@@ -53,8 +53,8 @@ class XWRdataPreProcTester
   //memWriteWord(csrAddress.base + 1*beatBytes, BigInt(1)) // complex
   memWriteWord(csrAddress.base + 2*beatBytes, BigInt(0))   // turn of testPattern mode
   memWriteWord(csrAddress.base + 3*beatBytes, BigInt(0))   // turn of rawData mode
-  memWriteWord(csrAddress.base + 4*beatBytes, BigInt(fftSize))
   memWriteWord(csrAddress.base + 5*beatBytes, BigInt(numSamples))
+  memWriteWord(csrAddress.base + 4*beatBytes, BigInt(fftSize))
   
   master.addTransactions((0 until inData.size).map(i => AXI4StreamTransaction(data = inData(i))))
   master.addTransactions((0 until inData.size).map(i => AXI4StreamTransaction(data = inData(i))))
@@ -90,9 +90,10 @@ class XWRdataPreProcTester
 
 class XWRdataPreProcSpec extends FlatSpec with Matchers {
   implicit val p: Parameters = Parameters.empty
-  
+  val params: AXI4XwrDataPreProcParams = AXI4XwrDataPreProcParams()
+
   it should "Test XWR data preproc block" in {
-    val lazyDut = LazyModule(new AXI4xWRdataPreProcBlock(address = AddressSet(0x010000, 0xFFF), maxFFTSize = 32, _beatBytes = 4, queueSize = 32) with AXI4xWRDataPreProcStandaloneBlock)
+    val lazyDut = LazyModule(new AXI4xWRdataPreProcBlock(address = AddressSet(0x010000, 0xFFF), params = params, _beatBytes = 4) with AXI4xWRDataPreProcStandaloneBlock)
     
     chisel3.iotesters.Driver.execute(Array("-tiwv", "-tbn", "verilator", "-tivsuv"), () => lazyDut.module) {
       c => new XWRdataPreProcTester(lazyDut, csrAddress = AddressSet(0x010000, 0xFFF), beatBytes = 4, silentFail = true)

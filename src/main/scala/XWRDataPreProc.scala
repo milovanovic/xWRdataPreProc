@@ -15,6 +15,15 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.tilelink._
 
+case class AXI4XwrDataPreProcParams(
+  maxFFTSize: Int = 1024,
+  queueSize: Int = 2048,
+  multiChirpMode: Boolean = false, // TODO
+  genLast: Boolean = true
+) {
+  // add some requirements
+}
+
 
 trait AXI4xWRDataPreProcStandaloneBlock extends AXI4xWRdataPreProcBlock {
   def standaloneParams = AXI4BundleParameters(addrBits = 32, dataBits = 32, idBits = 1)
@@ -43,7 +52,7 @@ trait AXI4xWRDataPreProcStandaloneBlock extends AXI4xWRdataPreProcBlock {
 }
 
 
-abstract class XWRdataPreProcBlock [ D, U, E, O, B <: Data] (beatBytes: Int, maxFFTSize: Int, queueSize: Int) extends LazyModule()(Parameters.empty) with DspBlock[D, U, E, O, B] with HasCSR {
+abstract class XWRdataPreProcBlock [D, U, E, O, B <: Data] (params: AXI4XwrDataPreProcParams, beatBytes: Int) extends LazyModule()(Parameters.empty) with DspBlock[D, U, E, O, B] with HasCSR {
   // This core should also generate lastOut signal depeneding on number of frames, number of chirps etc.
   
   val masterParams = AXI4StreamMasterParameters(
@@ -68,28 +77,29 @@ abstract class XWRdataPreProcBlock [ D, U, E, O, B <: Data] (beatBytes: Int, max
     val (in, edgeIn) = slaveNode.in.head
     
     val CP_data_length = 0                 // in the future equal to 2
-    val log2fftSize = log2Up(maxFFTSize + 1)
+    val log2fftSize = log2Up(params.maxFFTSize + 1)
     
     // Define Control registers
-    val IQSwap = RegInit(false.B)          // default is 0, I first
-    val adcFormat = RegInit(0.U(2.W))      // default is 0, Real
-    val testPattern = RegInit(true.B)      // default is 1, change in future
-    val rawData = RegInit(true.B)          // rawData is on, dsp part is off
+    val IQSwap = RegInit(true.B)           // default is 1, I first
+    val adcFormat = RegInit(1.U(2.W))      // default is 1, complex 1x
+    val testPattern = RegInit(false.B)     // default is 0, default is assumed that testPattern mode turned off
+    val rawData = RegInit(false.B)         // rawData is of, dsp part is on
     // val msbFirst = RegInit(true)        // default is 1, msb first is
     // val crcEnable = RegInit(false.B)    // default is off, crcEnable is off
     val delayedInData = RegInit(0.U(16.W))
     val swap = RegInit(false.B)
     val delayedOutData = RegNext(out.bits.data)
     
-    val fftSize      = RegNext(maxFFTSize.U(log2fftSize.W))
-    val adcSamplesP0 = RegInit(maxFFTSize.U(log2fftSize.W))
-    val adcSamplesP1 = RegInit(maxFFTSize.U(log2fftSize.W))
-    val adcSamplesP2 = RegInit(maxFFTSize.U(log2fftSize.W))
-    val adcSamplesP3 = RegInit(maxFFTSize.U(log2fftSize.W))
+    val fftSize        = RegInit(params.maxFFTSize.U(log2fftSize.W))
+    val chirpsPerFrame = RegInit(1.U(8.W))      // valid range 1 to 255 - defined by TI ICD document
+    val adcSamplesP0   = RegInit(params.maxFFTSize.U(log2fftSize.W))
+    val adcSamplesP1   = RegInit(params.maxFFTSize.U(log2fftSize.W))
+    val adcSamplesP2   = RegInit(params.maxFFTSize.U(log2fftSize.W))
+    val adcSamplesP3   = RegInit(params.maxFFTSize.U(log2fftSize.W))
     
     // fftSize needs to be defined inside this preproc block,
     // not configured via memory master model but for initial testing
-    // it is defined on that way and it is assumed that only profile used in radar configuration is profile 0
+    // it is defined on that way and it is assumed that the only profile used in radar configuration is profile 0
     // when streaming interface for fft configuration is inserted then fftSize should be configured only when previous CP is different than current CP value
     
     // val numZeros     = RegInit((maxFFTSize/2).U(log2Up(maxFFTSize/2 + 1)))
@@ -97,8 +107,9 @@ abstract class XWRdataPreProcBlock [ D, U, E, O, B <: Data] (beatBytes: Int, max
     val adcSamples = adcSamplesP0
     assert(fftSize >= adcSamplesP0, "FFT size needs to be larger than configured number of samples inside chirp")
     val numZeros = fftSize - adcSamples
-    val cntInData  = RegInit(0.U(log2Up(maxFFTSize + 1 + CP_data_length).W)) // assume there is no CP inserted, so maxFFTSize should be limit here
-    val cntOutData = RegInit(0.U(log2Up(maxFFTSize + 1).W)) // assume there is no CP inserted, so maxFFTSize should be limit here
+    //val cntInData  = RegInit(0.U(log2Up(params.maxFFTSize + 1 + CP_data_length).W))  // assume there is no CP inserted, so maxFFTSize is used as a size limitation
+    val cntOutData = RegInit(0.U(log2fftSize.W))                   // assume there is no CP inserted, so maxFFTSize is used as a size limitation
+    val cntChirps = RegInit(0.U(8.W))
     //val zeroPaddFlag = RegInit(false.B)
     val zeroPaddFlag = Wire(Bool())
     
@@ -116,29 +127,48 @@ abstract class XWRdataPreProcBlock [ D, U, E, O, B <: Data] (beatBytes: Int, max
         RegFieldDesc(name = "fftSize", desc = "Configured size of the FFT")),
       RegField(log2fftSize, adcSamplesP0,
         RegFieldDesc(name = "adcSamplesP0", desc = "Number of samples per chirp for profile 0")),
+      // add here optional fields
       RegField(log2fftSize, adcSamplesP1,
         RegFieldDesc(name = "adcSamplesP1", desc = "Number of samples per chirp for profile 1")),
       RegField(log2fftSize, adcSamplesP2,
         RegFieldDesc(name = "adcSamplesP2", desc = "Number of samples per chirp for profile 2")),
       RegField(log2fftSize, adcSamplesP3,
-        RegFieldDesc(name = "adcSamplesP3", desc = "Number of samples per chirp for profile 3"))
-      // read-only status registers
-      //RegField.r(1, msbFirst,
-        //RegFieldDesc(name = "msbFirst", desc = ""))
+        RegFieldDesc(name = "adcSamplesP3", desc = "Number of samples per chirp for profile 3")),
+      RegField(8, chirpsPerFrame,
+        RegFieldDesc(name = "chirpsPerFrame", desc = "Number of chirps per frame"))
     )
     
     // Define abstract register map so it can be AXI4, Tilelink, APB, AHB
     regmap(fields.zipWithIndex.map({ case (f, i) => i * beatBytes -> Seq(f)}): _*)
     in.ready := out.ready
-    val dataQueue = Module(new Queue(UInt((beatBytes*8).W), entries = queueSize, flow = true))
-    
-    when (out.valid && out.ready) {
+    val dataQueue = Module(new Queue(UInt((beatBytes*8).W), entries = params.queueSize, flow = true))
+    val outFire = out.valid && out.ready
+
+    when (outFire) {
       cntOutData := cntOutData + 1.U
     }
-    //when (cntOutData === fftSize) {
-    when (cntOutData === (fftSize - 1.U)) {
-      cntOutData := 0.U
+
+    when (cntOutData === (fftSize - 1.U) && outFire) {
+      cntChirps := cntChirps + 1.U
     }
+
+    when (cntChirps === chirpsPerFrame) {
+      cntChirps := 0.U
+    }
+
+    when (cntOutData === (fftSize - 1.U) && outFire) { //  check out.fire
+      cntOutData := 0.U
+      when (cntChirps === (chirpsPerFrame - 1.U)) {
+        out.bits.last := true.B // active only one signal of clock
+      }
+      .otherwise {
+        out.bits.last := false.B
+      }
+    }
+   .otherwise {
+      out.bits.last := false.B
+    }
+
     
     when (cntOutData < adcSamples) {
       zeroPaddFlag := false.B
@@ -170,10 +200,10 @@ abstract class XWRdataPreProcBlock [ D, U, E, O, B <: Data] (beatBytes: Int, max
       dataQueue.io.deq.ready  := out.ready
     }
     .elsewhen (adcFormat === 0.U) {
-      dataQueue.io.enq.bits  := inDataReg//in.bits.data // lsb bits are filled, by default msb bits are zero 
-      dataQueue.io.enq.valid := inValidReg//in.valid
+      dataQueue.io.enq.bits  := inDataReg  // in.bits.data // lsb bits are filled, msb bits are zeros by default
+      dataQueue.io.enq.valid := inValidReg // in.valid
       dataQueue.io.deq.ready := ~zeroPaddFlag
-     // out.bits.data    := Cat(in.bits.data.asUInt, 0.U(16.W)) // lsb bits are filled, by default msb bits are zero
+     // out.bits.data    := Cat(in.bits.data.asUInt, 0.U(16.W)) // lsb bits are filled, msb bits are zeros by default
      // out.valid        := in.valid
     }
     .otherwise {
@@ -184,7 +214,8 @@ abstract class XWRdataPreProcBlock [ D, U, E, O, B <: Data] (beatBytes: Int, max
         swap := true.B
         dataQueue.io.enq.bits := 0.U
         dataQueue.io.enq.valid  := false.B
-        dataQueue.io.deq.ready := ~zeroPaddFlag//false.B//out.ready // perhaps this is not important at all
+        // dataQueue.io.deq.ready := ~zeroPaddFlag // old
+        dataQueue.io.deq.ready := (~zeroPaddFlag && out.ready) // new -> this out.ready highly important when fft is in the state sFlush
       }
       //.elsewhen (in.valid & swap) {
       .elsewhen (inValidReg & swap) {
@@ -198,7 +229,7 @@ abstract class XWRdataPreProcBlock [ D, U, E, O, B <: Data] (beatBytes: Int, max
           //dataQueue.io.enq.bits := Cat(in.bits.data.asUInt, delayedInData.asUInt)
           dataQueue.io.enq.bits := Cat(inDataReg, delayedInData.asUInt)
         }
-        dataQueue.io.deq.ready := ~zeroPaddFlag // this should be generated from logic responsible for zero padding
+        dataQueue.io.deq.ready := (~zeroPaddFlag && out.ready) // new
       }
       .otherwise {
         dataQueue.io.enq.bits  := delayedOutData
@@ -206,13 +237,12 @@ abstract class XWRdataPreProcBlock [ D, U, E, O, B <: Data] (beatBytes: Int, max
         dataQueue.io.deq.ready := false.B//out.ready // perhaps this is not important at all
       }
     }
-    // perhaps dataQueue.io,enq.ready need to be actually just ~zeroPaddFlag
-    
     when (zeroPaddFlag) {
       out.valid := true.B
       out.bits.data := 0.U
-      in.ready := out.ready
+      //in.ready := out.ready // can accept new data but that data is stored inside queue
       // but in theory this block should be always ready to accept data
+      in.ready := dataQueue.io.enq.ready
     }
     .otherwise {
       out.valid := dataQueue.io.deq.valid
@@ -222,11 +252,11 @@ abstract class XWRdataPreProcBlock [ D, U, E, O, B <: Data] (beatBytes: Int, max
   }
 }
 
-class AXI4xWRdataPreProcBlock(address: AddressSet, _beatBytes: Int = 4, maxFFTSize: Int = 1024, queueSize: Int = 512)(implicit p: Parameters) extends XWRdataPreProcBlock[AXI4MasterPortParameters, AXI4SlavePortParameters, AXI4EdgeParameters, AXI4EdgeParameters, AXI4Bundle](_beatBytes, maxFFTSize, queueSize) with AXI4DspBlock with AXI4HasCSR {
+class AXI4xWRdataPreProcBlock(address: AddressSet, params: AXI4XwrDataPreProcParams,  _beatBytes: Int = 4)(implicit p: Parameters) extends XWRdataPreProcBlock[AXI4MasterPortParameters, AXI4SlavePortParameters, AXI4EdgeParameters, AXI4EdgeParameters, AXI4Bundle](params, _beatBytes) with AXI4DspBlock with AXI4HasCSR {
   override val mem = Some(AXI4RegisterNode(address = address, beatBytes = _beatBytes))
 }
 
-class TLxWRdataPreProcBlock(address: AddressSet, _beatBytes: Int = 4, maxFFTSize: Int = 1024, queueSize: Int = 512)(implicit p: Parameters) extends XWRdataPreProcBlock[TLClientPortParameters, TLManagerPortParameters, TLEdgeOut, TLEdgeIn, TLBundle](_beatBytes, maxFFTSize, queueSize) with TLDspBlock with TLHasCSR {
+class TLxWRdataPreProcBlock(address: AddressSet, params: AXI4XwrDataPreProcParams, _beatBytes: Int = 4)(implicit p: Parameters) extends XWRdataPreProcBlock[TLClientPortParameters, TLManagerPortParameters, TLEdgeOut, TLEdgeIn, TLBundle](params, _beatBytes) with TLDspBlock with TLHasCSR {
   val devname = "TLxWRdataPreProcBlock"
   val devcompat = Seq("xWRDataPreProc", "radardsp")
   val device = new SimpleDevice(devname, devcompat) {
@@ -241,11 +271,11 @@ class TLxWRdataPreProcBlock(address: AddressSet, _beatBytes: Int = 4, maxFFTSize
 
 object AXI4xWRPreProcBlockApp extends App
 {
-  val baseAddress = 0x500 // just to check if verilog code is succesfully generated or not
-  val maxFFTSize = 1024
-  val queueSize = 512
+  val baseAddress = 0x500
+  val params: AXI4XwrDataPreProcParams = AXI4XwrDataPreProcParams()
+
   implicit val p: Parameters = Parameters.empty
 
-  val xWRDataPreProcModule = LazyModule(new AXI4xWRdataPreProcBlock(AddressSet(baseAddress, 0xFF), _beatBytes = 4, maxFFTSize) with AXI4xWRDataPreProcStandaloneBlock)
-  chisel3.Driver.execute(args, ()=> xWRDataPreProcModule.module)
+  val xWRDataPreProcModule = LazyModule(new AXI4xWRdataPreProcBlock(AddressSet(baseAddress, 0xFF), params, _beatBytes = 4) with AXI4xWRDataPreProcStandaloneBlock)
+  chisel3.Driver.execute(args, ()=> xWRDataPreProcModule.module)  // change this to chisel stage
 }
