@@ -89,6 +89,7 @@ abstract class XWRdataPreProcBlock [D, U, E, O, B <: Data] (params: AXI4XwrDataP
     val delayedInData = RegInit(0.U(16.W))
     val swap = RegInit(false.B)
     val delayedOutData = RegNext(out.bits.data)
+    val genLast = RegInit(false.B)
     
     val fftSize        = RegInit(params.maxFFTSize.U(log2fftSize.W))
     val chirpsPerFrame = RegInit(1.U(8.W))      // valid range 1 to 255 - defined by TI ICD document
@@ -134,11 +135,13 @@ abstract class XWRdataPreProcBlock [D, U, E, O, B <: Data] (params: AXI4XwrDataP
         RegFieldDesc(name = "adcSamplesP2", desc = "Number of samples per chirp for profile 2")),
       RegField(log2fftSize, adcSamplesP3,
         RegFieldDesc(name = "adcSamplesP3", desc = "Number of samples per chirp for profile 3")),
+      RegField(1, genLast,
+        RegFieldDesc(name = "genLast", desc = "Used to enable or disable generation of last out signal")),
       RegField(8, chirpsPerFrame,
         RegFieldDesc(name = "chirpsPerFrame", desc = "Number of chirps per frame"))
     )
     
-    // Define abstract register map so it can be AXI4, Tilelink, APB, AHB
+    // define abstract register map so it can be AXI4, Tilelink, APB, AHB
     regmap(fields.zipWithIndex.map({ case (f, i) => i * beatBytes -> Seq(f)}): _*)
     in.ready := out.ready
     val dataQueue = Module(new Queue(UInt((beatBytes*8).W), entries = params.queueSize, flow = true))
@@ -159,14 +162,14 @@ abstract class XWRdataPreProcBlock [D, U, E, O, B <: Data] (params: AXI4XwrDataP
     when (cntOutData === (fftSize - 1.U) && outFire) { //  check out.fire
       cntOutData := 0.U
       when (cntChirps === (chirpsPerFrame - 1.U)) {
-        out.bits.last := true.B // active only one signal of clock
+        out.bits.last := true.B && genLast // active only one signal of clock
       }
       .otherwise {
-        out.bits.last := false.B
+        out.bits.last := false.B && genLast
       }
     }
    .otherwise {
-      out.bits.last := false.B
+      out.bits.last := false.B && genLast
     }
 
     
