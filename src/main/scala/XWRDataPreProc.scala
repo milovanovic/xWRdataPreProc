@@ -18,6 +18,7 @@ import freechips.rocketchip.tilelink._
 case class AXI4XwrDataPreProcParams(
   maxFFTSize: Int = 1024,
   queueSize: Int = 2048,
+  maxChirpsPerFrame: Int = 256,
   multiChirpMode: Boolean = false, // TODO
   genLast: Boolean = true
 ) {
@@ -78,6 +79,7 @@ abstract class XWRdataPreProcBlock [D, U, E, O, B <: Data] (params: AXI4XwrDataP
     
     val CP_data_length = 0                 // in the future equal to 2
     val log2fftSize = log2Up(params.maxFFTSize + 1)
+    val log2MaxChirpsPerFrame = log2Up(params.maxChirpsPerFrame + 1)
     
     // Define Control registers
     val IQSwap = RegInit(true.B)           // default is 1, I first
@@ -89,10 +91,10 @@ abstract class XWRdataPreProcBlock [D, U, E, O, B <: Data] (params: AXI4XwrDataP
     val delayedInData = RegInit(0.U(16.W))
     val swap = RegInit(false.B)
     val delayedOutData = RegNext(out.bits.data)
-    val genLast = RegInit(false.B)
+    val genLast = RegInit(true.B)          // by default last signal should be generated
     
     val fftSize        = RegInit(params.maxFFTSize.U(log2fftSize.W))
-    val chirpsPerFrame = RegInit(1.U(8.W))      // valid range 1 to 255 - defined by TI ICD document
+    val chirpsPerFrame = RegInit(42.U(log2MaxChirpsPerFrame.W))      // valid range 1 to 255 - defined by TI ICD document
     val adcSamplesP0   = RegInit(params.maxFFTSize.U(log2fftSize.W))
     val adcSamplesP1   = RegInit(params.maxFFTSize.U(log2fftSize.W))
     val adcSamplesP2   = RegInit(params.maxFFTSize.U(log2fftSize.W))
@@ -106,11 +108,12 @@ abstract class XWRdataPreProcBlock [D, U, E, O, B <: Data] (params: AXI4XwrDataP
     // val numZeros     = RegInit((maxFFTSize/2).U(log2Up(maxFFTSize/2 + 1)))
     // this in the future should replace switch where condition for switch is actually content of the field2 of CP data
     val adcSamples = adcSamplesP0
-    assert(fftSize >= adcSamplesP0, "FFT size needs to be larger than configured number of samples inside chirp")
+    // should not be asserted in config phase
+    //assert(fftSize >= adcSamplesP0, "FFT size needs to be larger than configured number of samples inside chirp")
     val numZeros = fftSize - adcSamples
     //val cntInData  = RegInit(0.U(log2Up(params.maxFFTSize + 1 + CP_data_length).W))  // assume there is no CP inserted, so maxFFTSize is used as a size limitation
     val cntOutData = RegInit(0.U(log2fftSize.W))                   // assume there is no CP inserted, so maxFFTSize is used as a size limitation
-    val cntChirps = RegInit(0.U(8.W))
+    val cntChirps = RegInit(0.U(log2MaxChirpsPerFrame.W))
     //val zeroPaddFlag = RegInit(false.B)
     val zeroPaddFlag = Wire(Bool())
     
@@ -144,7 +147,7 @@ abstract class XWRdataPreProcBlock [D, U, E, O, B <: Data] (params: AXI4XwrDataP
     // define abstract register map so it can be AXI4, Tilelink, APB, AHB
     regmap(fields.zipWithIndex.map({ case (f, i) => i * beatBytes -> Seq(f)}): _*)
     in.ready := out.ready
-    val dataQueue = Module(new Queue(UInt((beatBytes*8).W), entries = params.queueSize, flow = true))
+    val dataQueue = Module(new Queue(UInt((beatBytes*8).W), entries = params.queueSize, flow = true)) //replace it with block ram! and check generation of last signal
     val outFire = out.valid && out.ready
 
     when (outFire) {
@@ -235,9 +238,10 @@ abstract class XWRdataPreProcBlock [D, U, E, O, B <: Data] (params: AXI4XwrDataP
         dataQueue.io.deq.ready := (~zeroPaddFlag && out.ready) // new
       }
       .otherwise {
+        // do not add new data, but load old if there are available data inside the Queue
         dataQueue.io.enq.bits  := delayedOutData
         dataQueue.io.enq.valid := false.B
-        dataQueue.io.deq.ready := false.B//out.ready // perhaps this is not important at all
+        dataQueue.io.deq.ready := out.ready //false.B
       }
     }
     when (zeroPaddFlag) {
