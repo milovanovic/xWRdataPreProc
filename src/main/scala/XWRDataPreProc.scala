@@ -14,12 +14,14 @@ import freechips.rocketchip.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.regmapper._
 import freechips.rocketchip.tilelink._
+import dsputils._
 
 case class AXI4XwrDataPreProcParams(
   maxFFTSize: Int = 1024,
   queueSize: Int = 2048,
   maxChirpsPerFrame: Int = 256,
   multiChirpMode: Boolean = false, // TODO
+  useBlockRam: Boolean = false,
   genLast: Boolean = true
 ) {
   // add some requirements
@@ -144,10 +146,16 @@ abstract class XWRdataPreProcBlock [D, U, E, O, B <: Data] (params: AXI4XwrDataP
         RegFieldDesc(name = "chirpsPerFrame", desc = "Number of chirps per frame"))
     )
     
+//        val pipe: Boolean = false,
+//                        val flow: Boolean = false,
+//                        val useSyncReadMem: Boolean = false,
+//                        val useBlockRam: Boolean = false)
+
+
     // define abstract register map so it can be AXI4, Tilelink, APB, AHB
     regmap(fields.zipWithIndex.map({ case (f, i) => i * beatBytes -> Seq(f)}): _*)
     in.ready := out.ready
-    val dataQueue = Module(new Queue(UInt((beatBytes*8).W), entries = params.queueSize, flow = true)) //replace it with block ram! and check generation of last signal
+    val dataQueue = Module(new QueueWithSyncReadMem(UInt((beatBytes*8).W), entries = params.queueSize, flow = true, useSyncReadMem = params.useBlockRam, useBlockRam = params.useBlockRam)) //Module(new Queue(UInt((beatBytes*8).W), entries = params.queueSize, flow = true)) //replace it with block ram! and check generation of last signal
     val outFire = out.valid && out.ready
 
     when (outFire) {
