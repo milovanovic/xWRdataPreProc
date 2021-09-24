@@ -4,7 +4,7 @@ Radar data preprocessing block - xWRDataPreProc
 
 ## Overview
 
-This repository contains preprocessing block used inside radar dsp chain. It do following:
+This repository contains preprocessing block used inside radar dsp chain. It does following:
 
 * Pack raw radar data to specific form taking into account type of radar data (complex data or real data) - input is 16 bits data, output is 32 bits data that can be connected to the input of the fft block
 * Does zero padding logic if that is necessary
