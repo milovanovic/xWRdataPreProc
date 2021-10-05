@@ -155,7 +155,7 @@ abstract class XWRdataPreProcBlock [D, U, E, O, B <: Data] (params: AXI4XwrDataP
     // define abstract register map so it can be AXI4, Tilelink, APB, AHB
     regmap(fields.zipWithIndex.map({ case (f, i) => i * beatBytes -> Seq(f)}): _*)
     in.ready := out.ready
-    val dataQueue = Module(new QueueWithSyncReadMem(UInt((beatBytes*8).W), entries = params.queueSize, flow = true, useSyncReadMem = params.useBlockRam, useBlockRam = params.useBlockRam)) //Module(new Queue(UInt((beatBytes*8).W), entries = params.queueSize, flow = true)) //replace it with block ram! and check generation of last signal
+    val dataQueue = Module(new QueueWithSyncReadMem(UInt((beatBytes*8).W), entries = params.queueSize, flow = false, useSyncReadMem = params.useBlockRam, useBlockRam = params.useBlockRam)) //Module(new Queue(UInt((beatBytes*8).W), entries = params.queueSize, flow = true)) //replace it with block ram! and check generation of last signal
     val outFire = out.valid && out.ready
 
     when (outFire) {
