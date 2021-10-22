@@ -92,7 +92,7 @@ abstract class XWRdataPreProcBlock [D, U, E, O, B <: Data] (params: AXI4XwrDataP
     // val crcEnable = RegInit(false.B)    // default is off, crcEnable is off
     val delayedInData = RegInit(0.U(16.W))
     val swap = RegInit(false.B)
-    val delayedOutData = RegNext(out.bits.data)
+    val delayedOutData = RegNext(out.bits.data, init = 0.U)
     val genLast = RegInit(true.B)          // by default last signal should be generated
     
     val fftSize        = RegInit(params.maxFFTSize.U(log2fftSize.W))
@@ -209,7 +209,7 @@ abstract class XWRdataPreProcBlock [D, U, E, O, B <: Data] (params: AXI4XwrDataP
     
     when (testPattern || rawData) {
       // there is no need to do zero padding for those cases
-      dataQueue.io.enq.bits   := in.bits.data // lsb bits are filled, by default msb bits are zero 
+      dataQueue.io.enq.bits   := in.bits.data // lsb bits are filled, by default msb bits are zero
       dataQueue.io.enq.valid  := in.valid
       dataQueue.io.deq.ready  := out.ready
     }
