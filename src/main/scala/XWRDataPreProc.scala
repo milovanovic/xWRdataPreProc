@@ -203,8 +203,8 @@ abstract class XWRdataPreProcBlock [D, U, E, O, B <: Data] (params: AXI4XwrDataP
     when (cntOutData === fftSize) { // or fftSize - 1, this can be checked when additional block is added
       zeroPaddFlag := false.B
     }*/
-    val inValidReg = RegNext(in.valid)
-    val inDataReg = RegNext(in.bits.data)
+    val inValidReg = RegNext(in.valid, init = false.B)
+    val inDataReg = RegNext(in.bits.data, init = 0.U)
     
     
     when (testPattern || rawData) {
